@@ -1,9 +1,9 @@
 // +build windows
 
-package main
+package s3io
 
 import "syscall"
 
-func BuildFakeFileInfoSys() interface{} {
+func buildFakeFileInfoSys() interface{} {
 	return syscall.Win32FileAttributeData{}
 }

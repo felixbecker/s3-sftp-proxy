@@ -1,11 +1,11 @@
 // +build !windows
 
-package main
+package s3io
 
 import (
 	"syscall"
 )
 
-func BuildFakeFileInfoSys() interface{} {
+func buildFakeFileInfoSys() interface{} {
 	return &syscall.Stat_t{Uid: 65534, Gid: 65534}
 }

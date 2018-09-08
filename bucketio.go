@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"s3-sftp-proxy/s3io"
 	"sync"
 	"time"
 
@@ -214,37 +215,6 @@ func (oow *S3PutObjectWriter) WriteAt(buf []byte, off int64) (int, error) {
 	return n, err
 }
 
-type ObjectFileInfo struct {
-	_Name         string
-	_LastModified time.Time
-	_Size         int64
-	_Mode         os.FileMode
-}
-
-func (ofi *ObjectFileInfo) Name() string {
-	return ofi._Name
-}
-
-func (ofi *ObjectFileInfo) ModTime() time.Time {
-	return ofi._LastModified
-}
-
-func (ofi *ObjectFileInfo) Size() int64 {
-	return ofi._Size
-}
-
-func (ofi *ObjectFileInfo) Mode() os.FileMode {
-	return ofi._Mode
-}
-
-func (ofi *ObjectFileInfo) IsDir() bool {
-	return (ofi._Mode & os.ModeDir) != 0
-}
-
-func (ofi *ObjectFileInfo) Sys() interface{} {
-	return BuildFakeFileInfoSys()
-}
-
 type S3ObjectLister struct {
 	DebugLogger
 	Ctx              context.Context
@@ -340,28 +310,13 @@ func (sol *S3ObjectLister) ListAt(result []os.FileInfo, o int64) (int, error) {
 	}
 
 	if sol.continuation == nil {
-		sol.spooled = append(sol.spooled, &ObjectFileInfo{
-			_Name:         ".",
-			_LastModified: time.Unix(1, 0),
-			_Size:         0,
-			_Mode:         0755 | os.ModeDir,
-		})
-		sol.spooled = append(sol.spooled, &ObjectFileInfo{
-			_Name:         "..",
-			_LastModified: time.Unix(1, 0),
-			_Size:         0,
-			_Mode:         0755 | os.ModeDir,
-		})
+		sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(".", time.Unix(1, 0), 0, 0755|os.ModeDir))
+		sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo("..", time.Unix(1, 0), 0, 0755|os.ModeDir))
 
 		phObjs := sol.PhantomObjectMap.List(sol.Prefix)
 		for _, phInfo := range phObjs {
 			_phInfo := phInfo.GetOne()
-			sol.spooled = append(sol.spooled, &ObjectFileInfo{
-				_Name:         _phInfo.Key.Base(),
-				_LastModified: _phInfo.LastModified,
-				_Size:         _phInfo.Size,
-				_Mode:         0600, // TODO
-			})
+			sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(_phInfo.Key.Base(), _phInfo.LastModified, _phInfo.Size, 0600 /* TODO*/))
 		}
 	}
 
@@ -388,24 +343,19 @@ func (sol *S3ObjectLister) ListAt(result []os.FileInfo, o int64) (int, error) {
 
 	if sol.continuation == nil {
 		for _, cPfx := range out.CommonPrefixes {
-			sol.spooled = append(sol.spooled, &ObjectFileInfo{
-				_Name:         path.Base(*cPfx.Prefix),
-				_LastModified: time.Unix(1, 0),
-				_Size:         0,
-				_Mode:         0755 | os.ModeDir,
-			})
+			sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(path.Base(*cPfx.Prefix), time.Unix(1, 0), 0, 0755|os.ModeDir))
 		}
 	}
 	for _, obj := range out.Contents {
 		// if *obj.Key == sol.Prefix {
 		// 	continue
 		// }
-		sol.spooled = append(sol.spooled, &ObjectFileInfo{
-			_Name:         path.Base(*obj.Key),
-			_LastModified: *obj.LastModified,
-			_Size:         *obj.Size,
-			_Mode:         0644,
-		})
+		sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(
+			path.Base(*obj.Key),
+			*obj.LastModified,
+			*obj.Size,
+			0644,
+		))
 	}
 	sol.continuation = out.NextContinuationToken
 	if out.NextContinuationToken == nil {
@@ -451,22 +401,22 @@ func (sos *S3ObjectStat) ListAt(result []os.FileInfo, o int64) (int, error) {
 	}
 
 	if sos.Key.IsRoot() {
-		result[0] = &ObjectFileInfo{
-			_Name:         "/",
-			_LastModified: time.Time{},
-			_Size:         0,
-			_Mode:         0755 | os.ModeDir,
-		}
+		result[0] = s3io.NewObjectFileInfo(
+			"/",
+			time.Time{},
+			0,
+			0755|os.ModeDir,
+		)
 	} else {
 		phInfo := sos.PhantomObjectMap.Get(sos.Key)
 		if phInfo != nil {
 			_phInfo := phInfo.GetOne()
-			result[0] = &ObjectFileInfo{
-				_Name:         _phInfo.Key.Base(),
-				_LastModified: _phInfo.LastModified,
-				_Size:         _phInfo.Size,
-				_Mode:         0600, // TODO
-			}
+			result[0] = s3io.NewObjectFileInfo(
+				_phInfo.Key.Base(),
+				_phInfo.LastModified,
+				_phInfo.Size,
+				0600, // TODO
+			)
 		} else {
 			key := sos.Key.String()
 			F(sos.Debug, "GetObjectAclWithContext(Bucket=%s, Key=%s)", sos.Bucket, key)
@@ -487,18 +437,23 @@ func (sos *S3ObjectStat) ListAt(result []os.FileInfo, o int64) (int, error) {
 						Key:    &key,
 					},
 				)
-				objInfo := ObjectFileInfo{
-					_Name: sos.Key.Base(),
-					_Mode: aclToMode(out.Owner, out.Grants),
-				}
-				if err == nil {
-					F(sos.Debug, "=> { ContentLength=%d, LastModified=%v }", *headOut.ContentLength, *headOut.LastModified)
-					objInfo._Size = *headOut.ContentLength
-					objInfo._LastModified = *headOut.LastModified
+
+				// objInfo := ObjectFileInfo{
+				// 	_Name: sos.Key.Base(),
+				// 	_Mode: aclToMode(out.Owner, out.Grants),
+				// }
+				// TODO why only to vals supplied
+
+				var objInfo *s3io.ObjectFileInfo
+				if err != nil {
+					F(sos.Debug, "=> { ContentLength=%d, LastModified=%v, Error=%+v}", *headOut.ContentLength, *headOut.LastModified, err)
+					objInfo = s3io.NewObjectFileInfo(sos.Key.Base(), time.Now(), 0, aclToMode(out.Owner, out.Grants))
 				} else {
-					sos.Debug("=> ", err)
+					F(sos.Debug, "=> { ContentLength=%d, LastModified=%v }", *headOut.ContentLength, *headOut.LastModified)
+					objInfo = s3io.NewObjectFileInfo(sos.Key.Base(), *headOut.LastModified, *headOut.ContentLength, aclToMode(out.Owner, out.Grants))
 				}
-				result[0] = &objInfo
+
+				result[0] = objInfo
 			} else {
 				sos.Debug("=> ", err)
 				F(sos.Debug, "ListObjectsV2WithContext(Bucket=%s, Prefix=%s)", sos.Bucket, key)
@@ -516,12 +471,9 @@ func (sos *S3ObjectStat) ListAt(result []os.FileInfo, o int64) (int, error) {
 					return 0, os.ErrNotExist
 				}
 				F(sos.Debug, "=> { CommonPrefixes=len(%d), Contents=len(%d) }", len(out.CommonPrefixes), len(out.Contents))
-				result[0] = &ObjectFileInfo{
-					_Name:         sos.Key.Base(),
-					_LastModified: time.Time{},
-					_Size:         0,
-					_Mode:         0755 | os.ModeDir,
-				}
+
+				result[0] = s3io.NewObjectFileInfo(sos.Key.Base(), time.Now(), 0, 0755|os.ModeDir)
+
 			}
 		}
 	}
