@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"s3-sftp-proxy/logging"
+	"s3-sftp-proxy/phantomObjects"
+	"s3-sftp-proxy/s3io"
 	"sync"
 	"time"
 
@@ -15,14 +18,14 @@ import (
 type Server struct {
 	*ssh.ServerConfig
 	*S3Buckets
-	*PhantomObjectMap
+	*phantomObjects.PhantomObjectMap
 	ReaderLookbackBufferSize int
 	ReaderMinChunkSize       int
 	ListerLookbackBufferSize int
 	Log                      interface {
-		DebugLogger
-		InfoLogger
-		ErrorLogger
+		logging.DebugLogger
+		logging.InfoLogger
+		logging.ErrorLogger
 	}
 	Now func() time.Time
 }
@@ -103,10 +106,10 @@ func (s *Server) HandleChannel(ctx context.Context, bucket *S3Bucket, sshCh ssh.
 func (s *Server) HandleClient(ctx context.Context, conn *net.TCPConn) error {
 	defer s.Log.Debug("HandleClient ended")
 	defer func() {
-		F(s.Log.Info, "connection from client %s closed", conn.RemoteAddr().String())
+		s3io.F(s.Log.Info, "connection from client %s closed", conn.RemoteAddr().String())
 		conn.Close()
 	}()
-	F(s.Log.Info, "connected from client %s", conn.RemoteAddr().String())
+	s3io.F(s.Log.Info, "connected from client %s", conn.RemoteAddr().String())
 
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -122,7 +125,7 @@ func (s *Server) HandleClient(ctx context.Context, conn *net.TCPConn) error {
 		return err
 	}
 
-	F(s.Log.Info, "user %s logged in", sconn.User())
+	s3io.F(s.Log.Info, "user %s logged in", sconn.User())
 	bucket, ok := s.UserToBucketMap[sconn.User()]
 	if !ok {
 		return fmt.Errorf("unknown error: no bucket designated to user %s found", sconn.User())
@@ -146,14 +149,14 @@ func (s *Server) HandleClient(ctx context.Context, conn *net.TCPConn) error {
 		for newSSHCh := range chans {
 			if newSSHCh.ChannelType() != "session" {
 				newSSHCh.Reject(ssh.UnknownChannelType, "unknown channel type")
-				F(s.Log.Info, "unknown channel type: %s", newSSHCh.ChannelType())
+				s3io.F(s.Log.Info, "unknown channel type: %s", newSSHCh.ChannelType())
 				continue
 			}
-			F(s.Log.Info, "channel: %s", newSSHCh.ChannelType())
+			s3io.F(s.Log.Info, "channel: %s", newSSHCh.ChannelType())
 
 			sshCh, reqs, err := newSSHCh.Accept()
 			if err != nil {
-				F(s.Log.Error, "could not accept channel", err.Error())
+				s3io.F(s.Log.Error, "could not accept channel", err.Error())
 				break
 			}
 
@@ -226,4 +229,12 @@ outer:
 	}
 
 	return err
+}
+
+func IsTimeout(e error) bool {
+	t, ok := e.(interface{ Timeout() bool })
+	if ok {
+		return t.Timeout()
+	}
+	return false
 }

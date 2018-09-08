@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
+	"s3-sftp-proxy/config"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pkg/errors"
@@ -32,21 +33,21 @@ type AWSCredentialsConfig struct {
 }
 
 type S3BucketConfig struct {
-	Profile                        string                   `toml:"profile"`
-	Credentials                    *AWSCredentialsConfig    `toml:"credentials"`
-	Region                         string                   `toml:"region"`
-	Bucket                         string                   `toml:"bucket"`
-	KeyPrefix                      string                   `toml:"key_prefix"`
-	BucketUrl                      *URL                     `toml:"bucket_url"`
-	Auth                           string                   `toml:"auth"`
-	MaxObjectSize                  *int64                   `toml:"max_object_size"`
-	Readable                       *bool                    `toml:"readble"`
-	Writable                       *bool                    `toml:"writable"`
-	Listable                       *bool                    `toml:"listable"`
-	ServerSideEncryption           ServerSideEncryptionType `toml:"server_side_encryption"`
-	SSECustomerKey                 string                   `toml:"sse_customer_key"`
-	SSEKMSKeyId                    string                   `toml:"sse_kms_key_id"`
-	KeyboardInteractiveAuthEnabled bool                     `toml:"keyboard_interactive_auth"`
+	Profile                        string                          `toml:"profile"`
+	Credentials                    *AWSCredentialsConfig           `toml:"credentials"`
+	Region                         string                          `toml:"region"`
+	Bucket                         string                          `toml:"bucket"`
+	KeyPrefix                      string                          `toml:"key_prefix"`
+	BucketUrl                      *URL                            `toml:"bucket_url"`
+	Auth                           string                          `toml:"auth"`
+	MaxObjectSize                  *int64                          `toml:"max_object_size"`
+	Readable                       *bool                           `toml:"readble"`
+	Writable                       *bool                           `toml:"writable"`
+	Listable                       *bool                           `toml:"listable"`
+	ServerSideEncryption           config.ServerSideEncryptionType `toml:"server_side_encryption"`
+	SSECustomerKey                 string                          `toml:"sse_customer_key"`
+	SSEKMSKeyId                    string                          `toml:"sse_kms_key_id"`
+	KeyboardInteractiveAuthEnabled bool                            `toml:"keyboard_interactive_auth"`
 }
 
 type AuthUser struct {

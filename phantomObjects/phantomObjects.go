@@ -1,12 +1,13 @@
-package main
+package phantomObjects
 
 import (
+	"s3-sftp-proxy/s3path"
 	"sync"
 	"time"
 )
 
 type PhantomObjectInfo struct {
-	Key          Path
+	Key          s3path.Path
 	LastModified time.Time
 	Size         int64
 	Opaque       interface{}
@@ -19,7 +20,7 @@ func (info *PhantomObjectInfo) GetOne() PhantomObjectInfo {
 	return *info
 }
 
-func (info *PhantomObjectInfo) setKey(v Path) {
+func (info *PhantomObjectInfo) setKey(v s3path.Path) {
 	info.Mtx.Lock()
 	defer info.Mtx.Unlock()
 	info.Key = v
@@ -67,7 +68,7 @@ func (pom *PhantomObjectMap) Add(info *PhantomObjectInfo) bool {
 	return pom.add(info)
 }
 
-func (pom *PhantomObjectMap) remove(key Path) *PhantomObjectInfo {
+func (pom *PhantomObjectMap) remove(key s3path.Path) *PhantomObjectInfo {
 	prefix := key.Prefix().String()
 	m := pom.perPrefixObjects[prefix]
 	if m == nil {
@@ -85,7 +86,7 @@ func (pom *PhantomObjectMap) remove(key Path) *PhantomObjectInfo {
 	return info
 }
 
-func (pom *PhantomObjectMap) Remove(key Path) *PhantomObjectInfo {
+func (pom *PhantomObjectMap) Remove(key s3path.Path) *PhantomObjectInfo {
 	pom.mtx.Lock()
 	defer pom.mtx.Unlock()
 	return pom.remove(key)
@@ -110,7 +111,7 @@ func (pom *PhantomObjectMap) RemoveByInfoPtr(info *PhantomObjectInfo) bool {
 	return pom.removeByInfoPtr(info)
 }
 
-func (pom *PhantomObjectMap) rename(old, new Path) bool {
+func (pom *PhantomObjectMap) rename(old, new s3path.Path) bool {
 	info := pom.remove(old)
 	if info == nil {
 		return false
@@ -120,13 +121,13 @@ func (pom *PhantomObjectMap) rename(old, new Path) bool {
 	return true
 }
 
-func (pom *PhantomObjectMap) Rename(old, new Path) bool {
+func (pom *PhantomObjectMap) Rename(old, new s3path.Path) bool {
 	pom.mtx.Lock()
 	defer pom.mtx.Unlock()
 	return pom.rename(old, new)
 }
 
-func (pom *PhantomObjectMap) get(p Path) *PhantomObjectInfo {
+func (pom *PhantomObjectMap) get(p s3path.Path) *PhantomObjectInfo {
 	m := pom.perPrefixObjects[p.Prefix().String()]
 	if m == nil {
 		return nil
@@ -134,13 +135,13 @@ func (pom *PhantomObjectMap) get(p Path) *PhantomObjectInfo {
 	return m[p.Base()]
 }
 
-func (pom *PhantomObjectMap) Get(p Path) *PhantomObjectInfo {
+func (pom *PhantomObjectMap) Get(p s3path.Path) *PhantomObjectInfo {
 	pom.mtx.Lock()
 	defer pom.mtx.Unlock()
 	return pom.get(p)
 }
 
-func (pom *PhantomObjectMap) List(p Path) []*PhantomObjectInfo {
+func (pom *PhantomObjectMap) List(p s3path.Path) []*PhantomObjectInfo {
 	pom.mtx.Lock()
 	defer pom.mtx.Unlock()
 

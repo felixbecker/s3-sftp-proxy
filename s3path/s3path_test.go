@@ -1,8 +1,9 @@
-package main
+package s3path
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSplitIntoPath(t *testing.T) {

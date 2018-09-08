@@ -4,7 +4,9 @@ import (
 	"crypto"
 	"encoding/base64"
 	"fmt"
-	"strings"
+	"s3-sftp-proxy/config"
+
+	"s3-sftp-proxy/s3path"
 
 	aws "github.com/aws/aws-sdk-go/aws"
 	aws_creds "github.com/aws/aws-sdk-go/aws/credentials"
@@ -14,45 +16,6 @@ import (
 	s3 "github.com/aws/aws-sdk-go/service/s3"
 	"github.com/pkg/errors"
 )
-
-type ServerSideEncryptionType int
-
-const (
-	ServerSideEncryptionTypeNone = iota
-	ServerSideEncryptionTypeAES256
-	ServerSideEncryptionTypeKMS
-)
-
-var sseNameToEnumMap = map[string]ServerSideEncryptionType{
-	"":       ServerSideEncryptionTypeNone,
-	"none":   ServerSideEncryptionTypeNone,
-	"aes256": ServerSideEncryptionTypeAES256,
-	"kms":    ServerSideEncryptionTypeKMS,
-}
-
-func (v *ServerSideEncryptionType) UnmarshalText(text []byte) error {
-	_v, ok := sseNameToEnumMap[strings.ToLower(string(text))]
-	if !ok {
-		return fmt.Errorf("invalid value for ServerSideEncryption: %s", string(text))
-	}
-	*v = _v
-	return nil
-}
-
-type ServerSideEncryptionConfig struct {
-	Type           ServerSideEncryptionType
-	CustomerKey    string
-	CustomerKeyMD5 string
-	KMSKeyId       string
-}
-
-func (cfg *ServerSideEncryptionConfig) CustomerAlgorithm() string {
-	if cfg.Type == ServerSideEncryptionTypeAES256 {
-		return "AES256"
-	} else {
-		return ""
-	}
-}
 
 type Perms struct {
 	Readable bool
@@ -64,11 +27,11 @@ type S3Bucket struct {
 	Name                           string
 	AWSConfig                      *aws.Config
 	Bucket                         string
-	KeyPrefix                      Path
+	KeyPrefix                      s3path.Path
 	MaxObjectSize                  int64
 	Users                          UserStore
 	Perms                          Perms
-	ServerSideEncryption           ServerSideEncryptionConfig
+	ServerSideEncryption           config.ServerSideEncryptionConfig
 	KeyboardInteractiveAuthEnabled bool
 }
 
@@ -125,7 +88,7 @@ func buildS3Bucket(uStores UserStores, name string, bCfg *S3BucketConfig) (*S3Bu
 	if !ok {
 		return nil, fmt.Errorf("no such auth config: %s", bCfg.Auth)
 	}
-	keyPrefix := SplitIntoPath(bCfg.KeyPrefix)
+	keyPrefix := s3path.SplitIntoPath(bCfg.KeyPrefix)
 	if len(keyPrefix) > 0 && keyPrefix[0] == "" {
 		keyPrefix = keyPrefix[1:]
 	}
@@ -148,6 +111,7 @@ func buildS3Bucket(uStores UserStores, name string, bCfg *S3BucketConfig) (*S3Bu
 	} else {
 		customerKey = []byte{}
 	}
+
 	return &S3Bucket{
 		Name:          name,
 		AWSConfig:     awsCfg,
@@ -160,7 +124,7 @@ func buildS3Bucket(uStores UserStores, name string, bCfg *S3BucketConfig) (*S3Bu
 			Writable: *bCfg.Writable,
 			Listable: *bCfg.Listable,
 		},
-		ServerSideEncryption: ServerSideEncryptionConfig{
+		ServerSideEncryption: config.ServerSideEncryptionConfig{
 			Type:           bCfg.ServerSideEncryption,
 			CustomerKey:    string(customerKey),
 			CustomerKeyMD5: customerKeyMD5,

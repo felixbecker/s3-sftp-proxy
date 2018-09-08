@@ -1,46 +1,27 @@
 package s3io
 
 import (
-	"os"
-	"time"
+	"fmt"
+	"s3-sftp-proxy/config"
+
+	"github.com/aws/aws-sdk-go/aws"
 )
 
-func NewObjectFileInfo(name string, lastMod time.Time, size int64, mode os.FileMode) *ObjectFileInfo {
-	return &ObjectFileInfo{
-		name:         name,
-		lastModified: lastMod,
-		size:         size,
-		mode:         mode,
+var aclPrivate = "private"
+
+var sseTypes = map[config.ServerSideEncryptionType]*string{
+	config.ServerSideEncryptionTypeKMS: aws.String("aws:kms"),
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
 	}
+	return &s
 }
 
-type ObjectFileInfo struct {
-	name         string
-	lastModified time.Time
-	size         int64
-	mode         os.FileMode
-}
+type PrintlnLike func(...interface{})
 
-func (ofi *ObjectFileInfo) Name() string {
-	return ofi.name
-}
-
-func (ofi *ObjectFileInfo) ModTime() time.Time {
-	return ofi.lastModified
-}
-
-func (ofi *ObjectFileInfo) Size() int64 {
-	return ofi.size
-}
-
-func (ofi *ObjectFileInfo) Mode() os.FileMode {
-	return ofi.mode
-}
-
-func (ofi *ObjectFileInfo) IsDir() bool {
-	return (ofi.mode & os.ModeDir) != 0
-}
-
-func (ofi *ObjectFileInfo) Sys() interface{} {
-	return buildFakeFileInfoSys()
+func F(p PrintlnLike, f string, args ...interface{}) {
+	p(fmt.Sprintf(f, args...))
 }

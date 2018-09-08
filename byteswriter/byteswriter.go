@@ -1,8 +1,7 @@
-package main
+package byteswriter
 
 import (
 	"fmt"
-	"io"
 	"unsafe"
 )
 
@@ -17,7 +16,7 @@ func NewBytesWriter() *BytesWriter {
 	}
 }
 
-func castInt64ToInt(n int64) (int, error) {
+func CastInt64ToInt(n int64) (int, error) {
 	if unsafe.Sizeof(n) == unsafe.Sizeof(int(0)) {
 		return int(n), nil
 	} else {
@@ -55,7 +54,7 @@ func (bw *BytesWriter) grow(newCap int) {
 }
 
 func (bw *BytesWriter) Truncate(n int64) error {
-	_n, err := castInt64ToInt(n)
+	_n, err := CastInt64ToInt(n)
 	if err != nil {
 		return err
 	}
@@ -67,7 +66,7 @@ func (bw *BytesWriter) Truncate(n int64) error {
 }
 
 func (bw *BytesWriter) Seek(offset int64, whence int) (int64, error) {
-	_o, err := castInt64ToInt(offset)
+	_o, err := CastInt64ToInt(offset)
 	if err != nil {
 		return -1, err
 	}
@@ -95,7 +94,7 @@ func (bw *BytesWriter) Write(p []byte) (n int, err error) {
 }
 
 func (bw *BytesWriter) WriteAt(p []byte, offset int64) (n int, err error) {
-	_o, err := castInt64ToInt(offset)
+	_o, err := CastInt64ToInt(offset)
 	if err != nil {
 		return -1, err
 	}
@@ -114,16 +113,4 @@ func (bw *BytesWriter) Size() int64 {
 
 func (bw *BytesWriter) Bytes() []byte {
 	return bw.buf
-}
-
-func IsEOF(e error) bool {
-	return e == io.EOF || e == io.ErrUnexpectedEOF
-}
-
-func IsTimeout(e error) bool {
-	t, ok := e.(interface{ Timeout() bool })
-	if ok {
-		return t.Timeout()
-	}
-	return false
 }

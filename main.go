@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"s3-sftp-proxy/phantomObjects"
 	"time"
 
 	"github.com/pkg/errors"
@@ -37,6 +38,7 @@ func buildSSHServerConfig(buckets *S3Buckets, cfg *S3SFTPProxyConfig) (*ssh.Serv
 	if err != nil {
 		return nil, errors.Wrapf(err, `failed to parse host key "%s"`, cfg.HostKeyFile)
 	}
+
 	c := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, passwd []byte) (*ssh.Permissions, error) {
 			bucket, ok := buckets.UserToBucketMap[c.User()]
@@ -161,18 +163,19 @@ func main() {
 	defer cancel()
 
 	sigChan := make(chan os.Signal)
+
 	signal.Notify(sigChan, os.Interrupt)
 
 	errChan := make(chan error)
 	go func() {
 		errChan <- (&Server{
-			S3Buckets:                buckets,
-			ServerConfig:             sCfg,
-			Log:                      logger,
+			S3Buckets:    buckets,
+			ServerConfig: sCfg,
+			Log:          logger,
 			ReaderLookbackBufferSize: *cfg.ReaderLookbackBufferSize,
 			ReaderMinChunkSize:       *cfg.ReaderMinChunkSize,
 			ListerLookbackBufferSize: *cfg.ListerLookbackBufferSize,
-			PhantomObjectMap:         NewPhantomObjectMap(),
+			PhantomObjectMap:         phantomObjects.NewPhantomObjectMap(),
 			Now:                      time.Now,
 		}).RunListenerEventLoop(ctx, lsnr.(*net.TCPListener))
 	}()

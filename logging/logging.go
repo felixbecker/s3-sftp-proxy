@@ -1,4 +1,4 @@
-package main
+package logging
 
 type DebugLogger interface {
 	Debug(args ...interface{})
