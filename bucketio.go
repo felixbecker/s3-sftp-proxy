@@ -14,7 +14,6 @@ import (
 
 	"s3-sftp-proxy/phantomObjects"
 	"s3-sftp-proxy/s3io"
-	"sync"
 	"time"
 
 	aws "github.com/aws/aws-sdk-go/aws"
@@ -29,10 +28,6 @@ var sseTypes = map[config.ServerSideEncryptionType]*string{
 	config.ServerSideEncryptionTypeKMS: aws.String("aws:kms"),
 }
 
-type ReadDeadlineSettable interface {
-	SetReadDeadline(t time.Time) error
-}
-
 type WriteDeadlineSettable interface {
 	SetWriteDeadline(t time.Time) error
 }
@@ -42,119 +37,6 @@ func nilIfEmpty(s string) *string {
 		return nil
 	} else {
 		return &s
-	}
-}
-
-type S3GetObjectOutputReader struct {
-	Ctx          context.Context
-	Goo          *aws_s3.GetObjectOutput
-	Log          logging.DebugLogger
-	Lookback     int
-	MinChunkSize int
-	mtx          sync.Mutex
-	spooled      []byte
-	spoolOffset  int
-	noMore       bool
-}
-
-func (oor *S3GetObjectOutputReader) Close() error {
-	if oor.Goo.Body != nil {
-		oor.Goo.Body.Close()
-		oor.Goo.Body = nil
-	}
-	return nil
-}
-
-func (oor *S3GetObjectOutputReader) ReadAt(buf []byte, off int64) (int, error) {
-	oor.mtx.Lock()
-	defer oor.mtx.Unlock()
-
-	s3io.F(oor.Log.Debug, "len(buf)=%d, off=%d", len(buf), off)
-	_o, err := byteswriter.CastInt64ToInt(off)
-	if err != nil {
-		return 0, err
-	}
-	if _o < oor.spoolOffset {
-		return 0, fmt.Errorf("supplied position is out of range")
-	}
-
-	s := _o - oor.spoolOffset
-	i := 0
-	r := len(buf)
-	if s < len(oor.spooled) {
-		// n = max(r, len(oor.spooled)-s)
-		n := r
-		if n > len(oor.spooled)-s {
-			n = len(oor.spooled) - s
-		}
-		copy(buf[i:i+n], oor.spooled[s:s+n])
-		i += n
-		s += n
-		r -= n
-	}
-	if r == 0 {
-		return i, nil
-	}
-
-	if oor.noMore {
-		if i == 0 {
-			return 0, io.EOF
-		} else {
-			return i, nil
-		}
-	}
-
-	s3io.F(oor.Log.Debug, "s=%d, len(oor.spooled)=%d, oor.Lookback=%d", s, len(oor.spooled), oor.Lookback)
-	if s <= len(oor.spooled) && s >= oor.Lookback {
-		oor.spooled = oor.spooled[s-oor.Lookback:]
-		oor.spoolOffset += s - oor.Lookback
-		s = oor.Lookback
-	}
-
-	var e int
-	if len(oor.spooled)+oor.MinChunkSize < s+r {
-		e = s + r
-	} else {
-		e = len(oor.spooled) + oor.MinChunkSize
-	}
-
-	if cap(oor.spooled) < e {
-		spooled := make([]byte, len(oor.spooled), e)
-		copy(spooled, oor.spooled)
-		oor.spooled = spooled
-	}
-
-	type readResult struct {
-		n   int
-		err error
-	}
-
-	resultChan := make(chan readResult)
-	go func() {
-		n, err := io.ReadFull(oor.Goo.Body, oor.spooled[len(oor.spooled):e])
-		resultChan <- readResult{n, err}
-	}()
-	select {
-	case <-oor.Ctx.Done():
-		oor.Goo.Body.(ReadDeadlineSettable).SetReadDeadline(time.Unix(1, 0))
-		oor.Log.Debug("canceled")
-		return 0, fmt.Errorf("read operation canceled")
-	case res := <-resultChan:
-		if IsEOF(res.err) {
-			oor.noMore = true
-		}
-		e = len(oor.spooled) + res.n
-		oor.spooled = oor.spooled[:e]
-		if s < e {
-			be := e
-			if be > s+r {
-				be = s + r
-			}
-			copy(buf[i:], oor.spooled[s:be])
-			return be - s, nil
-		} else {
-			return 0, io.EOF
-		}
 	}
 }
 
@@ -259,7 +141,7 @@ func (s3Bio *S3BucketIO) Fileread(req *sftp.Request) (io.ReaderAt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &S3GetObjectOutputReader{
+	return &s3io.S3GetObjectOutputReader{
 		Ctx:          ctx,
 		Goo:          goo,
 		Log:          s3Bio.Log,
@@ -423,8 +305,4 @@ func (s3Bio *S3BucketIO) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", req.Method)
 	}
-}
-
-func IsEOF(e error) bool {
-	return e == io.EOF || e == io.ErrUnexpectedEOF
 }

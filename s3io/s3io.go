@@ -2,6 +2,7 @@ package s3io
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"s3-sftp-proxy/config"
 
@@ -13,6 +14,10 @@ var aclPrivate = "private"
 
 var sseTypes = map[config.ServerSideEncryptionType]*string{
 	config.ServerSideEncryptionTypeKMS: aws.String("aws:kms"),
+}
+
+func IsEOF(e error) bool {
+	return e == io.EOF || e == io.ErrUnexpectedEOF
 }
 
 func aclToMode(owner *s3.Owner, grants []*s3.Grant) os.FileMode {
