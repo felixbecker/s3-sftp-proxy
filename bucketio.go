@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"s3-sftp-proxy/byteswriter"
 	"s3-sftp-proxy/s3path"
 
@@ -159,20 +158,6 @@ func (oor *S3GetObjectOutputReader) ReadAt(buf []byte, off int64) (int, error) {
 	}
 }
 
-type S3ObjectLister struct {
-	logging.DebugLogger
-	Ctx              context.Context
-	Bucket           string
-	Prefix           s3path.Path
-	S3               *aws_s3.S3
-	Lookback         int
-	PhantomObjectMap *phantomObjects.PhantomObjectMap
-	spoolOffset      int
-	spooled          []os.FileInfo
-	continuation     *string
-	noMore           bool
-}
-
 func aclToMode(owner *aws_s3.Owner, grants []*aws_s3.Grant) os.FileMode {
 	var v os.FileMode
 	for _, g := range grants {
@@ -211,219 +196,6 @@ func aclToMode(owner *aws_s3.Owner, grants []*aws_s3.Grant) os.FileMode {
 		}
 	}
 	return v
-}
-
-func (sol *S3ObjectLister) ListAt(result []os.FileInfo, o int64) (int, error) {
-	_o, err := byteswriter.CastInt64ToInt(o)
-	if err != nil {
-		return 0, err
-	}
-
-	if _o < sol.spoolOffset {
-		return 0, fmt.Errorf("supplied position is out of range")
-	}
-
-	s := _o - sol.spoolOffset
-	i := 0
-	if s < len(sol.spooled) {
-		n := len(result)
-		if n > len(sol.spooled)-s {
-			n = len(sol.spooled) - s
-		}
-		copy(result[i:i+n], sol.spooled[s:s+n])
-		i += n
-		s = len(sol.spooled)
-	}
-
-	if i >= len(result) {
-		return i, nil
-	}
-
-	if sol.noMore {
-		if i == 0 {
-			return 0, io.EOF
-		} else {
-			return i, nil
-		}
-	}
-
-	if s <= len(sol.spooled) && s >= sol.Lookback {
-		sol.spooled = sol.spooled[s-sol.Lookback:]
-		sol.spoolOffset += s - sol.Lookback
-		s = sol.Lookback
-	}
-
-	if sol.continuation == nil {
-		sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(".", time.Unix(1, 0), 0, 0755|os.ModeDir))
-		sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo("..", time.Unix(1, 0), 0, 0755|os.ModeDir))
-
-		phObjs := sol.PhantomObjectMap.List(sol.Prefix)
-		for _, phInfo := range phObjs {
-			_phInfo := phInfo.GetOne()
-			sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(_phInfo.Key.Base(), _phInfo.LastModified, _phInfo.Size, 0600 /* TODO*/))
-		}
-	}
-
-	prefix := sol.Prefix.String()
-	if prefix != "" {
-		prefix += "/"
-	}
-	s3io.F(sol.Debug, "ListObjectsV2WithContext(Bucket=%s, Prefix=%s, Continuation=%v)", sol.Bucket, prefix, sol.continuation)
-	out, err := sol.S3.ListObjectsV2WithContext(
-		sol.Ctx,
-		&aws_s3.ListObjectsV2Input{
-			Bucket:            &sol.Bucket,
-			Prefix:            &prefix,
-			MaxKeys:           aws.Int64(10000),
-			Delimiter:         aws.String("/"),
-			ContinuationToken: sol.continuation,
-		},
-	)
-	if err != nil {
-		sol.Debug("=> ", err)
-		return i, err
-	}
-	s3io.F(sol.Debug, "=> { CommonPrefixes=len(%d), Contents=len(%d) }", len(out.CommonPrefixes), len(out.Contents))
-
-	if sol.continuation == nil {
-		for _, cPfx := range out.CommonPrefixes {
-
-			sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(path.Base(*cPfx.Prefix), time.Unix(1, 0), 0, 0755|os.ModeDir))
-		}
-	}
-	for _, obj := range out.Contents {
-		// if *obj.Key == sol.Prefix {
-		// 	continue
-		// }
-
-		sol.spooled = append(sol.spooled, s3io.NewObjectFileInfo(
-			path.Base(*obj.Key),
-			*obj.LastModified,
-			*obj.Size,
-			0644,
-		))
-	}
-	sol.continuation = out.NextContinuationToken
-	if out.NextContinuationToken == nil {
-		sol.noMore = true
-	}
-
-	var n int
-	if len(sol.spooled)-s > len(result)-i {
-		n = len(result) - i
-	} else {
-		n = len(sol.spooled) - s
-		if sol.noMore {
-			err = io.EOF
-		}
-	}
-
-	copy(result[i:i+n], sol.spooled[s:s+n])
-	return i + n, err
-}
-
-type S3ObjectStat struct {
-	logging.DebugLogger
-	Ctx              context.Context
-	Bucket           string
-	Key              s3path.Path
-	S3               *aws_s3.S3
-	PhantomObjectMap *phantomObjects.PhantomObjectMap
-}
-
-func (sos *S3ObjectStat) ListAt(result []os.FileInfo, o int64) (int, error) {
-	s3io.F(sos.Debug, "S3ObjectStat.ListAt: len(result)=%d offset=%d", len(result), o)
-	_o, err := byteswriter.CastInt64ToInt(o)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(result) == 0 {
-		return 0, nil
-	}
-
-	if _o > 0 {
-		return 0, fmt.Errorf("supplied position is out of range")
-	}
-
-	if sos.Key.IsRoot() {
-		result[0] = s3io.NewObjectFileInfo(
-			"/",
-			time.Time{},
-			0,
-			0755|os.ModeDir,
-		)
-	} else {
-		phInfo := sos.PhantomObjectMap.Get(sos.Key)
-		if phInfo != nil {
-			_phInfo := phInfo.GetOne()
-			result[0] = s3io.NewObjectFileInfo(
-				_phInfo.Key.Base(),
-				_phInfo.LastModified,
-				_phInfo.Size,
-				0600, // TODO
-			)
-		} else {
-			key := sos.Key.String()
-			s3io.F(sos.Debug, "GetObjectAclWithContext(Bucket=%s, Key=%s)", sos.Bucket, key)
-			out, err := sos.S3.GetObjectAclWithContext(
-				sos.Ctx,
-				&aws_s3.GetObjectAclInput{
-					Bucket: &sos.Bucket,
-					Key:    &key,
-				},
-			)
-			if err == nil {
-				s3io.F(sos.Debug, "=> %v", out)
-				s3io.F(sos.Debug, "HeadObjectWithContext(Bucket=%s, Key=%s)", sos.Bucket, key)
-				headOut, err := sos.S3.HeadObjectWithContext(
-					sos.Ctx,
-					&aws_s3.HeadObjectInput{
-						Bucket: &sos.Bucket,
-						Key:    &key,
-					},
-				)
-
-				// objInfo := ObjectFileInfo{
-				// 	_Name: sos.Key.Base(),
-				// 	_Mode: aclToMode(out.Owner, out.Grants),
-				// }
-				// TODO why only to vals supplied
-
-				var objInfo *s3io.ObjectFileInfo
-				if err != nil {
-					s3io.F(sos.Debug, "=> { ContentLength=%d, LastModified=%v, Error=%+v}", *headOut.ContentLength, *headOut.LastModified, err)
-					objInfo = s3io.NewObjectFileInfo(sos.Key.Base(), time.Now(), 0, aclToMode(out.Owner, out.Grants))
-				} else {
-					s3io.F(sos.Debug, "=> { ContentLength=%d, LastModified=%v }", *headOut.ContentLength, *headOut.LastModified)
-					objInfo = s3io.NewObjectFileInfo(sos.Key.Base(), *headOut.LastModified, *headOut.ContentLength, aclToMode(out.Owner, out.Grants))
-				}
-
-				result[0] = objInfo
-			} else {
-				sos.Debug("=> ", err)
-				s3io.F(sos.Debug, "ListObjectsV2WithContext(Bucket=%s, Prefix=%s)", sos.Bucket, key)
-				out, err := sos.S3.ListObjectsV2WithContext(
-					sos.Ctx,
-					&aws_s3.ListObjectsV2Input{
-						Bucket:    &sos.Bucket,
-						Prefix:    &key,
-						MaxKeys:   aws.Int64(10000),
-						Delimiter: aws.String("/"),
-					},
-				)
-				if err != nil || len(out.CommonPrefixes) == 0 {
-					sos.Debug("=> ", err)
-					return 0, os.ErrNotExist
-				}
-				s3io.F(sos.Debug, "=> { CommonPrefixes=len(%d), Contents=len(%d) }", len(out.CommonPrefixes), len(out.Contents))
-
-				result[0] = s3io.NewObjectFileInfo(sos.Key.Base(), time.Now(), 0, 0755|os.ModeDir)
-
-			}
-		}
-	}
-	return 1, nil
 }
 
 type S3BucketIO struct {
@@ -611,37 +383,42 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 	return nil
 }
 
-func (s3io *S3BucketIO) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
+func (s3Bio *S3BucketIO) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
+
 	sess, err := aws_session.NewSession()
 	if err != nil {
 		return nil, err
 	}
+
 	switch req.Method {
 	case "Stat", "ReadLink":
-		if !s3io.Perms.Readable && !s3io.Perms.Listable {
+		if !s3Bio.Perms.Readable && !s3Bio.Perms.Listable {
 			return nil, fmt.Errorf("stat operation not allowed as per configuration")
 		}
-		key := buildKey(s3io.Bucket, req.Filepath)
-		return &S3ObjectStat{
-			DebugLogger:      s3io.Log,
-			Ctx:              combineContext(s3io.Ctx, req.Context()),
-			Bucket:           s3io.Bucket.Bucket,
+		key := buildKey(s3Bio.Bucket, req.Filepath)
+
+		lister := s3io.S3ObjectStat{
+			DebugLogger:      s3Bio.Log,
+			Ctx:              combineContext(s3Bio.Ctx, req.Context()),
+			Bucket:           s3Bio.Bucket.Bucket,
 			Key:              key,
-			S3:               s3io.Bucket.S3(sess),
-			PhantomObjectMap: s3io.PhantomObjectMap,
-		}, nil
+			S3:               s3Bio.Bucket.S3(sess),
+			PhantomObjectMap: s3Bio.PhantomObjectMap,
+		}
+		return &lister, nil
 	case "List":
-		if !s3io.Perms.Listable {
+		if !s3Bio.Perms.Listable {
 			return nil, fmt.Errorf("listing operation not allowed as per configuration")
 		}
-		return &S3ObjectLister{
-			DebugLogger:      s3io.Log,
-			Ctx:              combineContext(s3io.Ctx, req.Context()),
-			Bucket:           s3io.Bucket.Bucket,
-			Prefix:           buildKey(s3io.Bucket, req.Filepath),
-			S3:               s3io.Bucket.S3(sess),
-			Lookback:         s3io.ListerLookbackBufferSize,
-			PhantomObjectMap: s3io.PhantomObjectMap,
+
+		return &s3io.S3ObjectLister{
+			DebugLogger:      s3Bio.Log,
+			Ctx:              combineContext(s3Bio.Ctx, req.Context()),
+			Bucket:           s3Bio.Bucket.Bucket,
+			Prefix:           buildKey(s3Bio.Bucket, req.Filepath),
+			S3:               *s3Bio.Bucket.S3(sess),
+			Lookback:         s3Bio.ListerLookbackBufferSize,
+			PhantomObjectMap: s3Bio.PhantomObjectMap,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", req.Method)
