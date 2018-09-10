@@ -1,10 +1,12 @@
-package main
+package users
 
 import (
 	"fmt"
+	"io/ioutil"
+	"s3-sftp-proxy/config"
+
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
-	"io/ioutil"
 )
 
 type User struct {
@@ -44,7 +46,7 @@ func parseAuthorizedKeys(pubKeys []ssh.PublicKey, pubKeyFileContent []byte) ([]s
 	return pubKeys, nil
 }
 
-func buildUsersFromAuthConfigInplace(users []*User, aCfg *AuthConfig) ([]*User, error) {
+func buildUsersFromAuthConfigInplace(users []*User, aCfg *config.AuthConfig) ([]*User, error) {
 	for name, params := range aCfg.Users {
 		var pubKeys []ssh.PublicKey
 		if params.PublicKeys != "" {
@@ -74,7 +76,7 @@ func buildUsersFromAuthConfigInplace(users []*User, aCfg *AuthConfig) ([]*User, 
 	return users, nil
 }
 
-func buildUsersFromAuthConfig(users []*User, aCfg *AuthConfig) ([]*User, error) {
+func buildUsersFromAuthConfig(users []*User, aCfg *config.AuthConfig) ([]*User, error) {
 	switch aCfg.Type {
 	case "inplace":
 		return buildUsersFromAuthConfigInplace(users, aCfg)
@@ -83,7 +85,7 @@ func buildUsersFromAuthConfig(users []*User, aCfg *AuthConfig) ([]*User, error) 
 	}
 }
 
-func NewUserStoresFromConfig(cfg *S3SFTPProxyConfig) (UserStores, error) {
+func NewUserStoresFromConfig(cfg *config.S3SFTPProxyConfig) (UserStores, error) {
 	uStores := UserStores{}
 	for name, aCfg := range cfg.AuthConfigs {
 		var err error

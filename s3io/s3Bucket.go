@@ -1,19 +1,20 @@
-package main
+package s3io
 
 import (
 	"crypto"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"s3-sftp-proxy/config"
-
 	"s3-sftp-proxy/s3path"
+	"s3-sftp-proxy/users"
 
-	aws "github.com/aws/aws-sdk-go/aws"
-	aws_creds "github.com/aws/aws-sdk-go/aws/credentials"
-	aws_ec2_role_creds "github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
-	aws_ec2_meta "github.com/aws/aws-sdk-go/aws/ec2metadata"
-	aws_session "github.com/aws/aws-sdk-go/aws/session"
-	s3 "github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/pkg/errors"
 )
 
@@ -29,7 +30,7 @@ type S3Bucket struct {
 	Bucket                         string
 	KeyPrefix                      s3path.Path
 	MaxObjectSize                  int64
-	Users                          UserStore
+	Users                          users.UserStore
 	Perms                          Perms
 	ServerSideEncryption           config.ServerSideEncryptionConfig
 	KeyboardInteractiveAuthEnabled bool
@@ -45,16 +46,16 @@ func (s3bs *S3Buckets) Get(name string) *S3Bucket {
 	return b
 }
 
-func (s3b *S3Bucket) S3(sess *aws_session.Session) *s3.S3 {
+func (s3b *S3Bucket) S3(sess *session.Session) *s3.S3 {
 	awsCfg := s3b.AWSConfig
 	if awsCfg.Credentials == nil {
-		awsCfg = s3b.AWSConfig.WithCredentials(aws_creds.NewChainCredentials(
-			[]aws_creds.Provider{
-				&aws_ec2_role_creds.EC2RoleProvider{
-					Client:       aws_ec2_meta.New(sess),
+		awsCfg = s3b.AWSConfig.WithCredentials(credentials.NewChainCredentials(
+			[]credentials.Provider{
+				&ec2rolecreds.EC2RoleProvider{
+					Client:       ec2metadata.New(sess),
 					ExpiryWindow: 0,
 				},
-				&aws_creds.EnvProvider{},
+				&credentials.EnvProvider{},
 			},
 		))
 	}
@@ -155,4 +156,56 @@ func NewS3BucketFromConfig(uStores UserStores, cfg *S3SFTPProxyConfig) (*S3Bucke
 		Buckets:         buckets,
 		UserToBucketMap: userToBucketMap,
 	}, nil
+}
+
+func aclToMode(owner *s3.Owner, grants []*s3.Grant) os.FileMode {
+	var v os.FileMode
+	for _, g := range grants {
+		if g.Grantee != nil {
+			if g.Grantee.ID != nil && *g.Grantee.ID == *owner.ID {
+				switch *g.Permission {
+				case "READ":
+					v |= 0400
+				case "WRITE":
+					v |= 0200
+				case "FULL_CONTROL":
+					v |= 0600
+				}
+			} else if g.Grantee.URI != nil {
+				switch *g.Grantee.URI {
+				case "http://acs.amazonaws.com/groups/global/AuthenticatedUsers":
+					switch *g.Permission {
+					case "READ":
+						v |= 0440
+					case "WRITE":
+						v |= 0220
+					case "FULL_CONTROL":
+						v |= 0660
+					}
+				case "http://acs.amazonaws.com/groups/global/AllUsers":
+					switch *g.Permission {
+					case "READ":
+						v |= 0444
+					case "WRITE":
+						v |= 0222
+					case "FULL_CONTROL":
+						v |= 0666
+					}
+				}
+			}
+		}
+	}
+	return v
+}
+
+func buildKey(s3b *S3Bucket, p string) s3path.Path {
+	return s3b.KeyPrefix.Join(s3path.SplitIntoPath(p))
+}
+
+func buildPath(s3b *S3Bucket, key string) (string, bool) {
+	_key := s3path.SplitIntoPath(key)
+	if !_key.IsPrefixed(s3b.KeyPrefix) {
+		return "", false
+	}
+	return "/" + _key[len(s3b.KeyPrefix):].String(), true
 }
