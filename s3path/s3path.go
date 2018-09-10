@@ -1,6 +1,8 @@
 package s3path
 
-import "strings"
+import (
+	"strings"
+)
 
 type Path []string
 
@@ -31,14 +33,32 @@ func splitIntoPathInner(p Path, path string, state int) Path {
 			}
 		}
 	}
+
 	return p
 }
+
+// func splitme(p string) []string {
+
+// 	if len(p) == 0 {
+// 		return []string{}
+// 	}
+// 	p = path.Clean(p)
+// 	log.Println(p)
+
+// 	if p[len(p)-1] == '/' {
+// 		p = p[:len(p)-1]
+// 	}
+// 	log.Println(p)
+// 	ps := strings.Split(p, "/")
+// 	return ps
+// }
 
 func SplitIntoPathAsAbs(path string) Path {
 	if path == "" {
 		return Path{}
 	}
 	return splitIntoPathInner(Path{""}, path, 0)
+	//return splitme(path)
 }
 
 func SplitIntoPath(path string) Path {
@@ -46,6 +66,8 @@ func SplitIntoPath(path string) Path {
 		return Path{}
 	}
 	return splitIntoPathInner(Path{}, path, 1)
+
+	//return splitme(path)
 }
 
 func (p Path) Canonicalize() Path {

@@ -80,9 +80,11 @@ func (s3Bio *S3BucketIO) Fileread(req *sftp.Request) (io.ReaderAt, error) {
 }
 
 func (s3Bio *S3BucketIO) Filewrite(req *sftp.Request) (io.WriterAt, error) {
+
 	if !s3Bio.Perms.Writable {
 		return nil, fmt.Errorf("write operation not allowed as per configuration")
 	}
+
 	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
@@ -91,7 +93,9 @@ func (s3Bio *S3BucketIO) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 	if maxObjectSize < 0 {
 		maxObjectSize = int64(^uint(0) >> 1)
 	}
+
 	key := buildKey(s3Bio.Bucket, req.Filepath)
+
 	info := &phantomObjects.PhantomObjectInfo{
 		Key:          key,
 		Size:         0,
@@ -110,8 +114,10 @@ func (s3Bio *S3BucketIO) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 		Info:                 info,
 		Writer:               byteswriter.NewBytesWriter(),
 	}
+
 	info.Opaque = oow
 	s3Bio.PhantomObjectMap.Add(info)
+
 	return oow, nil
 }
 
