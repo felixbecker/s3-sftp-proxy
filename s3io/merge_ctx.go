@@ -1,4 +1,4 @@
-package main
+package s3io
 
 import (
 	"context"

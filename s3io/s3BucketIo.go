@@ -10,7 +10,12 @@ import (
 	"s3-sftp-proxy/logging"
 	"s3-sftp-proxy/phantomObjects"
 
+	//"github.com/aws/aws-sdk-go/awstesting/integration/customizations/s3/s3crypto"
+
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 
 	"github.com/pkg/sftp"
 )
@@ -35,11 +40,11 @@ func (s3Bio *S3BucketIO) Fileread(req *sftp.Request) (io.ReaderAt, error) {
 	if !s3Bio.Perms.Readable {
 		return nil, fmt.Errorf("read operation not allowed as per configuration")
 	}
-	sess, err := aws_session.NewSession()
+	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
 	}
-	s3 := s3Bio.Bucket.S3(sess)
+	svc := s3Bio.Bucket.S3(sess)
 	key := buildKey(s3Bio.Bucket, req.Filepath)
 
 	phInfo := s3Bio.PhantomObjectMap.Get(key)
@@ -51,9 +56,9 @@ func (s3Bio *S3BucketIO) Fileread(req *sftp.Request) (io.ReaderAt, error) {
 	ctx := combineContext(s3Bio.Ctx, req.Context())
 	F(s3Bio.Log.Debug, "GetObject(Bucket=%s, Key=%s)", s3Bio.Bucket.Bucket, keyStr)
 	sse := s3Bio.ServerSideEncryption
-	goo, err := s3.GetObjectWithContext(
+	goo, err := svc.GetObjectWithContext(
 		ctx,
-		&aws_s3.GetObjectInput{
+		&s3.GetObjectInput{
 			Bucket:               &s3Bio.Bucket.Bucket,
 			Key:                  &keyStr,
 			SSECustomerAlgorithm: nilIfEmpty(sse.CustomerAlgorithm()),
@@ -61,6 +66,7 @@ func (s3Bio *S3BucketIO) Fileread(req *sftp.Request) (io.ReaderAt, error) {
 			SSECustomerKeyMD5:    nilIfEmpty(sse.CustomerKeyMD5),
 		},
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +83,7 @@ func (s3Bio *S3BucketIO) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 	if !s3Bio.Perms.Writable {
 		return nil, fmt.Errorf("write operation not allowed as per configuration")
 	}
-	sess, err := aws_session.NewSession()
+	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +126,7 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 		if s3Bio.PhantomObjectMap.Rename(src, dest) {
 			return nil
 		}
-		sess, err := aws_session.NewSession()
+		sess, err := session.NewSession()
 		if err != nil {
 			return err
 		}
@@ -131,7 +137,7 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 		F(s3Bio.Log.Debug, "CopyObject(Bucket=%s, Key=%s, CopySource=%s, Sse=%v)", s3Bio.Bucket.Bucket, destStr, copySource, sse.Type)
 		_, err = s3Bio.Bucket.S3(sess).CopyObjectWithContext(
 			combineContext(s3Bio.Ctx, req.Context()),
-			&aws_s3.CopyObjectInput{
+			&s3.CopyObjectInput{
 				ACL:                  &aclPrivate,
 				Bucket:               &s3Bio.Bucket.Bucket,
 				CopySource:           &copySource,
@@ -150,7 +156,7 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 		F(s3Bio.Log.Debug, "DeleteObject(Bucket=%s, Key=%s)", s3Bio.Bucket.Bucket, srcStr)
 		_, err = s3Bio.Bucket.S3(sess).DeleteObjectWithContext(
 			combineContext(s3Bio.Ctx, req.Context()),
-			&aws_s3.DeleteObjectInput{
+			&s3.DeleteObjectInput{
 				Bucket: &s3Bio.Bucket.Bucket,
 				Key:    &srcStr,
 			},
@@ -167,7 +173,7 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 		if s3Bio.PhantomObjectMap.Remove(key) != nil {
 			return nil
 		}
-		sess, err := aws_session.NewSession()
+		sess, err := session.NewSession()
 		if err != nil {
 			return err
 		}
@@ -175,7 +181,7 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 		F(s3Bio.Log.Debug, "DeleteObject(Bucket=%s, Key=%s)", s3Bio.Bucket.Bucket, key)
 		_, err = s3Bio.Bucket.S3(sess).DeleteObjectWithContext(
 			combineContext(s3Bio.Ctx, req.Context()),
-			&aws_s3.DeleteObjectInput{
+			&s3.DeleteObjectInput{
 				Bucket: &s3Bio.Bucket.Bucket,
 				Key:    &keyStr,
 			},
@@ -190,7 +196,7 @@ func (s3Bio *S3BucketIO) Filecmd(req *sftp.Request) error {
 
 func (s3Bio *S3BucketIO) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
 
-	sess, err := aws_session.NewSession()
+	sess, err := session.NewSession()
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +227,7 @@ func (s3Bio *S3BucketIO) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
 			Ctx:              combineContext(s3Bio.Ctx, req.Context()),
 			Bucket:           s3Bio.Bucket.Bucket,
 			Prefix:           buildKey(s3Bio.Bucket, req.Filepath),
-			S3:               *s3Bio.Bucket.S3(sess),
+			svc:              *s3Bio.Bucket.S3(sess),
 			Lookback:         s3Bio.ListerLookbackBufferSize,
 			PhantomObjectMap: s3Bio.PhantomObjectMap,
 		}, nil

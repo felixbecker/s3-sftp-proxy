@@ -22,7 +22,7 @@ type S3ObjectLister struct {
 	Ctx              context.Context
 	Bucket           string
 	Prefix           s3path.Path
-	S3               s3.S3
+	svc              s3.S3
 	Lookback         int
 	PhantomObjectMap *phantomObjects.PhantomObjectMap
 	spoolOffset      int
@@ -87,7 +87,7 @@ func (sol *S3ObjectLister) ListAt(result []os.FileInfo, o int64) (int, error) {
 		prefix += "/"
 	}
 	F(sol.Debug, "ListObjectsV2WithContext(Bucket=%s, Prefix=%s, Continuation=%v)", sol.Bucket, prefix, sol.continuation)
-	out, err := sol.S3.ListObjectsV2WithContext(
+	out, err := sol.svc.ListObjectsV2WithContext(
 		sol.Ctx,
 		&s3.ListObjectsV2Input{
 			Bucket:            &sol.Bucket,

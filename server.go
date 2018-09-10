@@ -17,7 +17,7 @@ import (
 
 type Server struct {
 	*ssh.ServerConfig
-	*S3Buckets
+	*s3io.S3Buckets
 	*phantomObjects.PhantomObjectMap
 	ReaderLookbackBufferSize int
 	ReaderMinChunkSize       int
@@ -39,12 +39,12 @@ func asHandlers(handlers interface {
 	return sftp.Handlers{handlers, handlers, handlers, handlers}
 }
 
-func (s *Server) HandleChannel(ctx context.Context, bucket *S3Bucket, sshCh ssh.Channel, reqs <-chan *ssh.Request) {
+func (s *Server) HandleChannel(ctx context.Context, bucket *s3io.S3Bucket, sshCh ssh.Channel, reqs <-chan *ssh.Request) {
 	defer s.Log.Debug("HandleChannel ended")
 	server := sftp.NewRequestServer(
 		sshCh,
 		asHandlers(
-			&S3BucketIO{
+			&s3io.S3BucketIO{
 				Ctx:    ctx,
 				Bucket: bucket,
 				ReaderLookbackBufferSize: s.ReaderLookbackBufferSize,

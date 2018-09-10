@@ -9,7 +9,10 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"s3-sftp-proxy/config"
 	"s3-sftp-proxy/phantomObjects"
+	"s3-sftp-proxy/s3io"
+	"s3-sftp-proxy/users"
 	"time"
 
 	"github.com/pkg/errors"
@@ -29,7 +32,7 @@ func init() {
 	flag.BoolVar(&debug, "debug", false, "turn on debugging output")
 }
 
-func buildSSHServerConfig(buckets *S3Buckets, cfg *S3SFTPProxyConfig) (*ssh.ServerConfig, error) {
+func buildSSHServerConfig(buckets *s3io.S3Buckets, cfg *config.S3SFTPProxyConfig) (*ssh.ServerConfig, error) {
 	pem, err := ioutil.ReadFile(cfg.HostKeyFile)
 	if err != nil {
 		return nil, errors.Wrapf(err, `failed to open "%s"`, cfg.HostKeyFile)
@@ -68,6 +71,7 @@ func buildSSHServerConfig(buckets *S3Buckets, cfg *S3SFTPProxyConfig) (*ssh.Serv
 						}, nil
 					}
 				}
+
 			}
 			return nil, fmt.Errorf("public keys do not match")
 		},
@@ -119,17 +123,17 @@ func bail(msg string, status ...interface{}) {
 
 func main() {
 	flag.Parse()
-	cfg, err := ReadConfigFromFile(configFile)
+	cfg, err := config.ReadConfigFromFile(configFile)
 	if err != nil {
 		bail(err.Error())
 	}
 
-	uStores, err := NewUserStoresFromConfig(cfg)
+	uStores, err := users.NewUserStoresFromConfig(cfg)
 	if err != nil {
 		bail(err.Error())
 	}
 
-	buckets, err := NewS3BucketFromConfig(uStores, cfg)
+	buckets, err := s3io.NewS3BucketFromConfig(uStores, cfg)
 	if err != nil {
 		bail(err.Error())
 	}

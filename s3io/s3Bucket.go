@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"s3-sftp-proxy/config"
+
 	"s3-sftp-proxy/s3path"
 	"s3-sftp-proxy/users"
 
@@ -62,11 +63,11 @@ func (s3b *S3Bucket) S3(sess *session.Session) *s3.S3 {
 	return s3.New(sess, awsCfg)
 }
 
-func buildS3Bucket(uStores UserStores, name string, bCfg *S3BucketConfig) (*S3Bucket, error) {
+func buildS3Bucket(uStores users.UserStores, name string, bCfg *config.S3BucketConfig) (*S3Bucket, error) {
 	awsCfg := aws.NewConfig()
 	if bCfg.Credentials != nil {
 		awsCfg = awsCfg.WithCredentials(
-			aws_creds.NewStaticCredentials(
+			credentials.NewStaticCredentials(
 				bCfg.Credentials.AWSAccessKeyID,
 				bCfg.Credentials.AWSSecretAccessKey,
 				"",
@@ -74,7 +75,7 @@ func buildS3Bucket(uStores UserStores, name string, bCfg *S3BucketConfig) (*S3Bu
 		)
 	} else if bCfg.Profile != "" {
 		awsCfg = awsCfg.WithCredentials(
-			aws_creds.NewSharedCredentials(
+			credentials.NewSharedCredentials(
 				"", // TODO: assumes default
 				bCfg.Profile,
 			),
@@ -135,7 +136,7 @@ func buildS3Bucket(uStores UserStores, name string, bCfg *S3BucketConfig) (*S3Bu
 	}, nil
 }
 
-func NewS3BucketFromConfig(uStores UserStores, cfg *S3SFTPProxyConfig) (*S3Buckets, error) {
+func NewS3BucketFromConfig(uStores users.UserStores, cfg *config.S3SFTPProxyConfig) (*S3Buckets, error) {
 	buckets := map[string]*S3Bucket{}
 	userToBucketMap := map[string]*S3Bucket{}
 	for name, bCfg := range cfg.Buckets {
